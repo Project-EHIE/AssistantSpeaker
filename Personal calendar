@@ -1,0 +1,102 @@
+import speech_recognition as sr
+import pyttsx3
+import datetime
+import sqlite3
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+recognizer = sr.Recognizer()
+engine = pyttsx3.init()
+
+conn = sqlite3.connect('calendar.db')
+c = conn.cursor()
+
+c.execute('''CREATE TABLE IF NOT EXISTS events
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT, date DATE)''')
+
+#need to add a personal email address here
+EMAIL_ADDRESS = 'email@gmail.com'
+EMAIL_PASSWORD = 'email password'
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+
+def add_event(event, date):
+    c.execute("INSERT INTO events (event, date) VALUES (?, ?)", (event, date))
+    conn.commit()
+
+def get_events(date):
+    c.execute("SELECT event FROM events WHERE date = ?", (date,))
+    events = c.fetchall()
+    return events
+
+def send_email(subject, message):
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_ADDRESS
+        msg['To'] = EMAIL_ADDRESS
+        msg['Subject'] = subject
+        msg.attach(MIMEText(message, 'plain'))
+        server.send_message(msg)
+
+def recognize_speech():
+    with sr.Microphone() as source:
+        print("Speak now...")
+        audio = recognizer.listen(source)
+        try:
+            text = recognizer.recognize_google(audio, language="en-US")
+            print("You said:", text)
+            engine.say("You said: " + text)
+            engine.runAndWait()
+            return text
+        except sr.UnknownValueError:
+            print("Sorry, could not understand what you said")
+            engine.say("Sorry, could not understand what you said")
+            engine.runAndWait()
+            return ""
+
+def check_upcoming_events():
+    today = datetime.date.today()
+    upcoming_date = today + datetime.timedelta(days=1)
+    events = get_events(upcoming_date)
+    if events:
+        for event in events:
+            engine.say("You have an event tomorrow: " + event[0])
+            engine.runAndWait()
+            send_email("Calendar Event Reminder", "You have an event tomorrow: " + event[0])
+    else:
+        engine.say("You don't have any events tomorrow")
+        engine.runAndWait()
+
+def main():
+    while True:
+        text = recognize_speech()
+        if "add event" in text:
+            engine.say("Please say the event content and date")
+            engine.runAndWait()
+            event_text = recognize_speech()
+            event_date = recognize_speech()
+            add_event(event_text, event_date)
+            engine.say("Event has been added to the calendar")
+            engine.runAndWait()
+        elif "view calendar" in text:
+            engine.say("Please say the date")
+            engine.runAndWait()
+            date = recognize_speech()
+            events = get_events(date)
+            if events:
+                engine.say("You have the following events for that day:")
+                for event in events:
+                    engine.say(event[0])
+            else:
+                engine.say("You don't have any events for that day")
+            engine.runAndWait()
+        elif "reminder" in text:
+            check_upcoming_events()
+        elif "exit" in text:
+            break
+
+if __name__ == "__main__":
+    main()
